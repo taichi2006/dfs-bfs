@@ -6,13 +6,17 @@ import threading
 import time
 import heapq
 
-# ================= COLORS =================
+# ================= THEME =================
 BG = "#1a1b26"
 FRAME = "#24283b"
 BTN = "#7aa2f7"
+BTN_HOVER = "#9ab8ff"
 TEXT = "#ffffff"
 EMPTY = "#414868"
 TILE = "#c0caf5"
+LOG_BG = "#0b1220"
+SUCCESS = "#00ff9f"
+INFO = "#ffd166"
 
 # ================= STATES =================
 START = (2,8,3,1,6,4,7,0,5)
@@ -44,7 +48,7 @@ def neighbors(state):
 
             yield tuple(s), mv
 
-# ================= MANHATTAN =================
+# ================= HEURISTIC =================
 def manhattan(state, goal):
 
     dist = 0
@@ -59,7 +63,7 @@ def manhattan(state, goal):
 
         r2, c2 = divmod(target, 3)
 
-        dist += abs(r1 - r2) + abs(c1 - c2)
+        dist += abs(r1-r2) + abs(c1-c2)
 
     return dist
 
@@ -352,30 +356,41 @@ class Puzzle:
 
         self.root = root
 
-        self.root.title("8 Puzzle Visual Solver")
+        self.root.title("8 Puzzle AI Solver")
 
-        self.root.geometry("1200x760")
+        self.root.geometry("1350x780")
 
         self.root.config(bg=BG)
 
         self.running = False
 
+        # ================= TITLE =================
         tk.Label(
             root,
-            text="8 PUZZLE VISUAL SOLVER",
-            font=("Arial",28,"bold"),
+            text="8 PUZZLE AI SOLVER",
+            font=("Arial",30,"bold"),
             bg=BG,
             fg="#00d4ff"
         ).pack(pady=15)
 
-        main = tk.Frame(root, bg=FRAME)
+        main = tk.Frame(root, bg=BG)
 
-        main.pack(fill="both", expand=True, padx=20, pady=10)
+        main.pack(fill="both", expand=True)
 
-        # ============ LEFT ============
-        left = tk.Frame(main, bg=FRAME)
+        # ================= LEFT PANEL =================
+        left = tk.Frame(
+            main,
+            bg=FRAME,
+            bd=2,
+            relief="ridge"
+        )
 
-        left.pack(side="left", padx=30)
+        left.pack(
+            side="left",
+            fill="y",
+            padx=20,
+            pady=10
+        )
 
         self.start = self.make_grid(
             left,
@@ -386,9 +401,13 @@ class Puzzle:
         tk.Button(
             left,
             text="Random Start",
+            font=("Arial",12,"bold"),
+            width=20,
+            height=2,
             bg=BTN,
             fg="white",
-            width=18,
+            activebackground=BTN_HOVER,
+            relief="flat",
             command=self.random_start
         ).pack(pady=15)
 
@@ -398,6 +417,7 @@ class Puzzle:
             GOAL
         )
 
+        # ================= BUTTON AREA =================
         bf = tk.Frame(left, bg=FRAME)
 
         bf.pack(pady=20)
@@ -409,41 +429,85 @@ class Puzzle:
             ("Solve UCS", self.solve_ucs),
             ("Solve Greedy", self.solve_greedy),
             ("Solve A*", self.solve_astar),
-            ("Reset", self.reset)
         ]
 
         for i, (txt, cmd) in enumerate(buttons):
 
-            tk.Button(
+            b = tk.Button(
                 bf,
                 text=txt,
+                width=16,
+                height=2,
+                font=("Arial",11,"bold"),
                 bg=BTN,
                 fg="white",
-                width=14,
+                activebackground=BTN_HOVER,
+                relief="flat",
+                cursor="hand2",
                 command=cmd
-            ).grid(
-                row=i//2,
-                column=i%2,
-                padx=8,
-                pady=8
             )
 
-        # ============ RIGHT ============
-        right = tk.Frame(main, bg=FRAME)
+            b.grid(
+                row=i//2,
+                column=i%2,
+                padx=10,
+                pady=10,
+                sticky="nsew"
+            )
 
-        right.pack(side="right", padx=30)
+        reset_btn = tk.Button(
+            bf,
+            text="RESET",
+            width=36,
+            height=2,
+            font=("Arial",11,"bold"),
+            bg="#ff5f5f",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            command=self.reset
+        )
+
+        reset_btn.grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            padx=10,
+            pady=12,
+            sticky="nsew"
+        )
+
+        # ================= RIGHT PANEL =================
+        right = tk.Frame(
+            main,
+            bg=FRAME,
+            bd=2,
+            relief="ridge"
+        )
+
+        right.pack(
+            side="right",
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=10
+        )
 
         tk.Label(
             right,
             text="VISUALIZATION",
-            font=("Arial",22,"bold"),
+            font=("Arial",24,"bold"),
             bg=FRAME,
             fg=TEXT
-        ).pack(pady=10)
+        ).pack(pady=15)
 
-        board = tk.Frame(right, bg=FRAME)
+        # ================= BOARD =================
+        board = tk.Frame(
+            right,
+            bg=FRAME
+        )
 
-        board.pack()
+        board.pack(pady=10)
 
         self.cells = []
 
@@ -457,51 +521,63 @@ class Puzzle:
                     board,
                     width=4,
                     height=2,
-                    font=("Arial",30,"bold"),
-                    bg=TILE
+                    font=("Arial",32,"bold"),
+                    bg=TILE,
+                    fg="#111111",
+                    relief="ridge",
+                    bd=4
                 )
 
                 lbl.grid(
                     row=i,
                     column=j,
-                    padx=6,
-                    pady=6
+                    padx=8,
+                    pady=8
                 )
 
                 row.append(lbl)
 
             self.cells.append(row)
 
+        # ================= STATUS =================
         self.status = tk.Label(
             right,
             text="READY",
-            font=("Arial",14,"bold"),
+            font=("Arial",16,"bold"),
             bg=FRAME,
-            fg="#00ff9f"
+            fg=SUCCESS
         )
 
-        self.status.pack(pady=12)
+        self.status.pack(pady=10)
 
         self.info = tk.Label(
             right,
-            text="g(n)=0   h(n)=0   f(n)=0",
-            font=("Arial",16,"bold"),
+            text="g(n)=0    h(n)=0    f(n)=0",
+            font=("Consolas",16,"bold"),
             bg=FRAME,
-            fg="#ffd166"
+            fg=INFO
         )
 
         self.info.pack(pady=5)
 
+        # ================= LOG =================
         self.log = tk.Text(
             right,
-            width=45,
+            width=50,
             height=18,
             font=("Consolas",11),
-            bg="#0b1220",
-            fg="#00ff9f"
+            bg=LOG_BG,
+            fg=SUCCESS,
+            relief="flat",
+            insertbackground="white"
         )
 
-        self.log.pack()
+        self.log.pack(
+            padx=20,
+            pady=20,
+            fill="both",
+            expand=True
+        )
 
         self.draw(START)
 
@@ -511,10 +587,10 @@ class Puzzle:
         tk.Label(
             parent,
             text=title,
-            font=("Arial",18,"bold"),
+            font=("Arial",20,"bold"),
             bg=FRAME,
             fg=TEXT
-        ).pack(pady=10)
+        ).pack(pady=12)
 
         f = tk.Frame(parent, bg=FRAME)
 
@@ -534,7 +610,9 @@ class Puzzle:
                     f,
                     width=3,
                     font=("Arial",28,"bold"),
-                    justify="center"
+                    justify="center",
+                    relief="flat",
+                    bg="#dbe4ff"
                 )
 
                 if data[k]:
@@ -543,8 +621,9 @@ class Puzzle:
                 e.grid(
                     row=i,
                     column=j,
-                    padx=5,
-                    pady=5
+                    padx=6,
+                    pady=6,
+                    ipady=8
                 )
 
                 row.append(e)
@@ -580,7 +659,7 @@ class Puzzle:
 
             messagebox.showerror(
                 "Error",
-                "Nhap du so 0-8"
+                "Nhap du cac so 0-8"
             )
 
             return None
@@ -608,7 +687,7 @@ class Puzzle:
             f = g + h
 
             self.info.config(
-                text=f"g(n)={g}   h(n)={h}   f(n)={f}"
+                text=f"g(n) = {g}     h(n) = {h}     f(n) = {f}"
             )
 
         self.root.update()
@@ -654,7 +733,9 @@ class Puzzle:
 
         self.log.delete(1.0, tk.END)
 
+        self.write("="*45)
         self.write(f"{algo} SOLUTION")
+        self.write("="*45)
         self.write(f"Steps : {len(path)}")
         self.write(f"Moves : {' '.join(path)}")
         self.write("")
@@ -671,20 +752,17 @@ class Puzzle:
 
             f = g + h
 
-            self.write(f"Step {i}")
-
+            self.write(f"STEP {i}")
             self.write(f"g(n) = {g}")
-
             self.write(f"h(n) = {h}")
-
             self.write(f"f(n) = {f}")
 
             for r in range(0, 9, 3):
                 self.write(str(s[r:r+3]))
 
-            self.write("")
+            self.write("-"*40)
 
-            time.sleep(0.4)
+            time.sleep(0.35)
 
         self.status.config(
             text=f"{algo} COMPLETED"
@@ -709,7 +787,7 @@ class Puzzle:
 
             messagebox.showerror(
                 "Error",
-                "Unsolvable"
+                "Unsolvable State"
             )
 
             return
@@ -760,6 +838,7 @@ class Puzzle:
             daemon=True
         ).start()
 
+    # ================= BUTTON FUNCTIONS =================
     def solve_bfs(self):
         self.solve("BFS")
 
