@@ -1,5 +1,3 @@
-
-
 import tkinter as tk
 from tkinter import messagebox
 from collections import deque
@@ -8,6 +6,7 @@ import threading
 import time
 import heapq
 import math
+from functools import lru_cache
 
 # ================= THEME =================
 BG = "#1a1b26"
@@ -60,7 +59,17 @@ def random_state(goal):
         if solvable(s, goal):
             return s
 
-# ================= CÁC THUẬT TOÁN =================
+def build_path(parent, goal):
+    path, states = [], []
+    cur = goal
+    while cur:
+        states.append(cur)
+        p, mv = parent[cur]
+        if mv: path.append(mv)
+        cur = p
+    return path[::-1], states[::-1]
+
+# ================= CÁC THUẬT TOÁN CŨ =================
 def bfs(start, goal):
     q = deque([start])
     parent = {start:(None,None)}
@@ -303,22 +312,16 @@ def simulated_annealing(start, goal, initial_temp=100.0, alpha=0.95, max_iter=10
         temp *= alpha
     return (path, states) if current == goal else (None, None)
 
-# ================= BELIEF-STATE SEARCH (SENSORLESS) =================
 def belief_bfs(starts, goal):
     initial_belief = frozenset(starts)
-
     if all(s == goal for s in initial_belief):
         return [], [initial_belief]
-
     q = deque([initial_belief])
     parent = {initial_belief: (None, None)}
-
     while q:
         cur_belief = q.popleft()
-
         for action in ['U', 'D', 'L', 'R']:
             next_set = set()
-
             for s in cur_belief:
                 moved = False
                 for nxt, mv in neighbors(s):
@@ -328,14 +331,10 @@ def belief_bfs(starts, goal):
                         break
                 if not moved:
                     next_set.add(s)
-
             next_belief = frozenset(next_set)
-
             if next_belief in parent:
                 continue
-
             parent[next_belief] = (cur_belief, action)
-
             if all(state == goal for state in next_belief):
                 actions = []
                 beliefs = []
@@ -347,20 +346,51 @@ def belief_bfs(starts, goal):
                         actions.append(act)
                     b = prev_b
                 return actions[::-1], beliefs[::-1]
-
             q.append(next_belief)
-
     return None, None
 
-def build_path(parent, goal):
-    path, states = [], []
-    cur = goal
-    while cur:
-        states.append(cur)
-        p, mv = parent[cur]
-        if mv: path.append(mv)
-        cur = p
-    return path[::-1], states[::-1]
+# ================= AND-OR GRAPH SEARCH (TỐI ƯU) =================
+def and_or_graph_search(initial_belief, goal, max_depth=18):
+    """Tìm kiếm AND-OR với giới hạn độ sâu và heuristic để tăng tốc."""
+    def next_belief(belief, action):
+        nxt = set()
+        for s in belief:
+            moved = False
+            for ns, mv in neighbors(s):
+                if mv == action:
+                    nxt.add(ns)
+                    moved = True
+                    break
+            if not moved:
+                nxt.add(s)
+        return frozenset(nxt)
+
+    @lru_cache(maxsize=None)
+    def solve(belief, depth):
+        if depth > max_depth:
+            return False, None, None
+        if all(s == goal for s in belief):
+            return True, [], [belief]
+        
+        # Heuristic: sắp xếp action theo tổng Manhattan trung bình (thấp trước)
+        actions = ['U', 'D', 'L', 'R']
+        action_heuristic = []
+        for action in actions:
+            nb = next_belief(belief, action)
+            avg_h = sum(manhattan(s, goal) for s in nb) / len(nb) if nb else 1e9
+            action_heuristic.append((avg_h, action, nb))
+        action_heuristic.sort(key=lambda x: x[0])  # ưu tiên avg_h nhỏ
+        
+        for _, action, nb in action_heuristic:
+            ok, sub_actions, sub_beliefs = solve(nb, depth+1)
+            if ok:
+                return True, [action] + sub_actions, [belief] + sub_beliefs
+        return False, None, None
+
+    ok, actions, beliefs = solve(initial_belief, 0)
+    if ok:
+        return actions, beliefs
+    return None, None
 
 # ================= GUI =================
 class Puzzle:
@@ -378,6 +408,7 @@ class Puzzle:
         main = tk.Frame(root, bg=BG)
         main.pack(fill="both", expand=True, padx=10, pady=5)
 
+        # Khung bên trái (có thanh cuộn)
         left_container = tk.Frame(main, bg=FRAME)
         left_container.pack(side="left", fill="both", expand=True, padx=10, pady=5)
 
@@ -408,11 +439,12 @@ class Puzzle:
             ("Simple Hill", self.solve_simple_hill), ("Best Hill", self.solve_best_hill),
             ("Random Hill", self.solve_random_hill), ("Random Restart", self.solve_restart_hill),
             ("Local Beam (k=3)", self.solve_beam), ("Simulated Annealing", self.solve_sa),
-            ("Belief Search", self.solve_belief_bfs)
+            ("Belief Search", self.solve_belief_bfs),
+            ("AND-OR Graph Search", self.solve_and_or)
         ]
 
         for i, (txt, cmd) in enumerate(buttons):
-            b = tk.Button(bf, text=txt, width=14, height=1, font=("Arial",9,"bold"),
+            b = tk.Button(bf, text=txt, width=16, height=1, font=("Arial",9,"bold"),
                           bg=BTN, fg="white", activebackground=BTN_HOVER,
                           cursor="hand2", command=cmd)
             b.grid(row=i//4, column=i%4, padx=6, pady=6, sticky="nsew")
@@ -422,6 +454,7 @@ class Puzzle:
                               relief="flat", cursor="hand2", command=self.reset)
         reset_btn.pack(pady=20)
 
+        # Khung bên phải
         right = tk.Frame(main, bg=FRAME, bd=2, relief="ridge")
         right.pack(side="right", fill="both", expand=True, padx=10, pady=5)
 
@@ -518,15 +551,14 @@ class Puzzle:
             r, c = divmod(i, 3)
             cells[r][c].config(text="" if v == 0 else str(v),
                                bg=EMPTY if v == 0 else TILE)
-        if board == 1:
-            if goal:
-                g, h = inv(state), manhattan(state, goal)
-                if self.info_mode == "full":
-                    self.info.config(text=f"g(n)={g} h(n)={h} f(n)={g+h}")
-                elif self.info_mode == "only_h":
-                    self.info.config(text=f"h(n)={h}")
-                else:
-                    self.info.config(text=f"g(n)={g}")
+        if board == 1 and goal:
+            g, h = inv(state), manhattan(state, goal)
+            if self.info_mode == "full":
+                self.info.config(text=f"g(n)={g} h(n)={h} f(n)={g+h}")
+            elif self.info_mode == "only_h":
+                self.info.config(text=f"h(n)={h}")
+            else:
+                self.info.config(text=f"g(n)={g}")
         self.root.update()
 
     def draw_belief(self, state1, state2):
@@ -556,8 +588,9 @@ class Puzzle:
         self.write("="*45)
         self.write(f"{algo} SOLUTION")
         self.write("="*45)
-        self.write(f"Steps: {len(path)}")
-        self.write(f"Moves: {' '.join(path)}\n")
+        if path:
+            self.write(f"Steps: {len(path)}")
+            self.write(f"Moves: {' '.join(path)}\n")
         goal = self.read(self.goal)
 
         if algo == "A*":
@@ -567,7 +600,7 @@ class Puzzle:
         else:
             self.info_mode = "only_g"
 
-        if algo == "Belief Search" and belief_pairs is not None:
+        if belief_pairs is not None:
             self.board2_frame.pack(side="left", padx=10)
             for i, (s1, s2) in enumerate(belief_pairs):
                 self.draw_belief(s1, s2)
@@ -580,7 +613,6 @@ class Puzzle:
                     self.write(f"STEP {i}: State1 h={h1}, State2 h={h2}")
                 else:
                     self.write(f"STEP {i}: State1 depth={g1}, State2 depth={g2}")
-                # In 2 ma trận
                 self.write("State1 matrix:")
                 for r in range(0, 9, 3):
                     self.write("   " + str(s1[r:r+3]))
@@ -592,19 +624,20 @@ class Puzzle:
             self.board2_frame.pack_forget()
         else:
             self.board2_frame.pack_forget()
-            for i, s in enumerate(states):
-                self.draw(s)
-                g, h = inv(s), manhattan(s, goal) if goal else 0
-                if self.info_mode == "full":
-                    self.write(f"STEP {i}: g={g} h={h} f={g+h}")
-                elif self.info_mode == "only_h":
-                    self.write(f"STEP {i}: h={h}")
-                else:
-                    self.write(f"STEP {i} (depth={g})")
-                for r in range(0, 9, 3):
-                    self.write(str(s[r:r+3]))
-                self.write("-"*40)
-                time.sleep(0.35)
+            if states:
+                for i, s in enumerate(states):
+                    self.draw(s)
+                    g, h = inv(s), manhattan(s, goal) if goal else 0
+                    if self.info_mode == "full":
+                        self.write(f"STEP {i}: g={g} h={h} f={g+h}")
+                    elif self.info_mode == "only_h":
+                        self.write(f"STEP {i}: h={h}")
+                    else:
+                        self.write(f"STEP {i} (depth={g})")
+                    for r in range(0, 9, 3):
+                        self.write(str(s[r:r+3]))
+                    self.write("-"*40)
+                    time.sleep(0.35)
         self.status.config(text=f"{algo} COMPLETED")
         self.running = False
 
@@ -625,14 +658,27 @@ class Puzzle:
                 self.animate(path, states, algo)
         threading.Thread(target=run, daemon=True).start()
 
+    def solve_bfs(self): self.solve("BFS", bfs)
+    def solve_dfs(self): self.solve("DFS", dfs)
+    def solve_ids(self): self.solve("IDS", ids)
+    def solve_ucs(self): self.solve("UCS", ucs)
+    def solve_greedy(self): self.solve("GREEDY", greedy)
+    def solve_astar(self): self.solve("A*", astar)
+    def solve_simple_hill(self): self.solve("Simple Hill", simple_hill_climbing)
+    def solve_best_hill(self): self.solve("Best Hill", best_hill_climbing)
+    def solve_random_hill(self): self.solve("Random Hill", random_hill_climbing)
+    def solve_restart_hill(self): self.solve("Random Restart", random_restart_hill_climbing)
+    def solve_beam(self): self.solve("Local Beam (k=3)", local_beam_search_with_path)
+    def solve_sa(self): self.solve("Simulated Annealing", simulated_annealing)
+
     def solve_belief_bfs(self):
         if self.running: return
         goal = self.read(self.goal)
         if not goal:
             messagebox.showerror("Error", "Please enter goal state")
             return
-        s1 = (1,2,3,8,4,5,7,6,0)   # 2 bước
-        s2 = (1,2,3,8,4,5,7,0,6)   # 3 bước
+        s1 = (1,2,3,8,4,5,7,6,0)
+        s2 = (1,2,3,8,4,5,7,0,6)
         self.status.config(text="RUNNING Belief Search...")
         def run():
             actions, beliefs = belief_bfs([s1, s2], goal)
@@ -660,18 +706,41 @@ class Puzzle:
             self.animate(actions, None, "Belief Search", belief_pairs=belief_pairs)
         threading.Thread(target=run, daemon=True).start()
 
-    def solve_bfs(self): self.solve("BFS", bfs)
-    def solve_dfs(self): self.solve("DFS", dfs)
-    def solve_ids(self): self.solve("IDS", ids)
-    def solve_ucs(self): self.solve("UCS", ucs)
-    def solve_greedy(self): self.solve("GREEDY", greedy)
-    def solve_astar(self): self.solve("A*", astar)
-    def solve_simple_hill(self): self.solve("Simple Hill", simple_hill_climbing)
-    def solve_best_hill(self): self.solve("Best Hill", best_hill_climbing)
-    def solve_random_hill(self): self.solve("Random Hill", random_hill_climbing)
-    def solve_restart_hill(self): self.solve("Random Restart", random_restart_hill_climbing)
-    def solve_beam(self): self.solve("Local Beam (k=3)", local_beam_search_with_path)
-    def solve_sa(self): self.solve("Simulated Annealing", simulated_annealing)
+    def solve_and_or(self):
+        if self.running: return
+        goal = self.read(self.goal)
+        if not goal:
+            messagebox.showerror("Error", "Please enter goal state")
+            return
+        s1 = (1,2,3,8,4,5,7,6,0)
+        s2 = (1,2,3,8,4,5,7,0,6)
+        initial_belief = frozenset([s1, s2])
+        self.status.config(text="RUNNING AND-OR Graph Search (max_depth=18)...")
+        def run():
+            actions, beliefs = and_or_graph_search(initial_belief, goal, max_depth=18)
+            if actions is None:
+                messagebox.showinfo("Result", "AND-OR Graph Search could not find solution within depth limit (18)")
+                return
+            self.log.delete(1.0, tk.END)
+            self.log.insert(tk.END, f"Fixed start states:\n{s1}\n{s2}\n\n")
+            self.log.insert(tk.END, "AND-OR SEARCH PLAN\n")
+            self.log.insert(tk.END, "=" * 50 + "\n")
+            belief_pairs = []
+            for b in beliefs:
+                lst = list(b)
+                if len(lst) >= 2:
+                    state_a, state_b = lst[0], lst[1]
+                elif len(lst) == 1:
+                    state_a = state_b = lst[0]
+                else:
+                    continue
+                belief_pairs.append((state_a, state_b))
+                self.log.insert(tk.END, f"Belief state (size={len(b)})\n")
+                for st in b:
+                    self.log.insert(tk.END, str(st) + "\n")
+                self.log.insert(tk.END, "-" * 50 + "\n")
+            self.animate(actions, None, "AND-OR Graph Search", belief_pairs=belief_pairs)
+        threading.Thread(target=run, daemon=True).start()
 
     def reset(self):
         if self.running: return
